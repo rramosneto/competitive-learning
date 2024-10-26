@@ -1,15 +1,21 @@
+from __future__ import annotations
+
+import random
 from abc import ABC, abstractmethod
-from random import random
-from typing import Any, Callable, Set, Tuple
+from typing import Any, Callable, List, Set, Tuple
 from uuid import UUID, uuid4
 
+import numpy as np
+import numpy.typing as npt
 from pydantic import BaseModel, Field, model_validator
-from typing_extensions import Literal
+from pydantic.config import ConfigDict  # noqa: F401
+
+from competitive_learning.function import euclidean_distance, fixed_learning_rate
 
 
 class DataPoint(BaseModel):
     id: UUID = Field(default_factory=uuid4)
-    coordinates: Tuple[float, ...]
+    coordinates: npt.NDArray[np.float64]
 
     @property
     def dimension(self) -> int:
@@ -17,7 +23,7 @@ class DataPoint(BaseModel):
 
     @property
     def norm(self) -> float:
-        return sum(coord**2 for coord in self.coordinates) ** 0.5
+        return np.linalg.norm(self.coordinates)
 
     def __getitem__(self, index: int) -> float:
         try:
@@ -27,13 +33,19 @@ class DataPoint(BaseModel):
                 f"Index {index} is out of range for coordinates with length {len(self.coordinates)}"
             )
 
+    @classmethod
+    def dummy(cls, n: int = 2) -> "DataPoint":
+        return cls(coordinates=np.array([random.random() for _ in range(n)]))
+
+    class Config:
+        arbitrary_types_allowed = True
+
 
 class Dataset(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     data_points: Tuple[DataPoint, ...]
     available_points: Set[int] = Field(default_factory=set)
     used_points: Set[int] = Field(default_factory=set)
-    state: int = 0
     reset_count: int = 0
 
     def model_post_init(self, __context) -> None:
@@ -49,9 +61,12 @@ class Dataset(BaseModel):
 
     def reset(self) -> None:
         self.reset_count += 1
-        self.state = 0
         self.used_points.clear()
         self.available_points = set(range(len(self.data_points)))
+
+    def get_one(self) -> DataPoint:
+        index = random.choice(list(self.available_points))
+        return self[index]
 
     def __getitem__(self, index: int) -> DataPoint:
         if index in self.used_points:
@@ -82,15 +97,21 @@ class Dataset(BaseModel):
         with open(csv_path) as f:
             for line in f:
                 data_points.append(
-                    DataPoint(coordinates=tuple(map(float, line.strip().split(","))))
+                    DataPoint(
+                        coordinates=np.array(tuple(map(float, line.strip().split(","))))
+                    )
                 )
         return cls(data_points=tuple(data_points))
+
+    @classmethod
+    def dummy(cls, dimension, len) -> "Dataset":
+        return cls(data_points=tuple(DataPoint.dummy(dimension) for _ in range(len)))
 
 
 class Neuron(DataPoint):
     iterations: int = 0
 
-    def update_weights(self, coordinates: Tuple[int, ...]) -> None:
+    def update_weights(self, coordinates: Tuple[float, ...]) -> None:
         self.iterations += 1
         self.coordinates = coordinates
 
@@ -98,8 +119,6 @@ class Neuron(DataPoint):
 class NeuralNetwork(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     neurons: Tuple[Neuron, ...]
-    state: int = 0
-    epoch: int = 0
 
     @property
     def dimension(self) -> int:
@@ -128,76 +147,211 @@ class NeuralNetwork(BaseModel):
                     raise ValueError("All neurons must have the same dimension")
         return data
 
+    @classmethod
+    def dummy(cls, dimension: int) -> "NeuralNetwork":
+        return cls(neurons=(Neuron.dummy(dimension), Neuron.dummy(dimension)))
+
 
 class LearningStrategy(BaseModel, ABC):
     id: UUID = Field(default_factory=uuid4)
     proximity_function: Callable
-    learning_rate: Callable
+    neural_network: NeuralNetwork
 
     @abstractmethod
-    def choose_neurons(self, data_point: DataPoint, neurons: Tuple[Neuron, ...]) -> Tuple[Neuron, ...]:
+    def choose_neurons(self, data_point: DataPoint) -> Tuple[Tuple[Neuron, ...], float]:
         pass
 
     @abstractmethod
-    def uptate_neurons_weights(self, neurons: Tuple[Neuron, ...]) -> None:
+    def uptate_neurons_weights(
+        self,
+        data_point: DataPoint,
+        neurons: Tuple[Neuron, ...],
+        learning_rate: float,
+    ) -> None:
         pass
 
+    @classmethod
+    def dummy(cls) -> "LearningStrategy":
+        return RandomStrategy(proximity_function=lambda x: x, learning_rate=lambda x: x)
 
-class DummyStrategy(LearningStrategy):
-    def choose_neurons(self, data_point: DataPoint, neurons: Tuple[Neuron, ...]) -> Tuple[Neuron, ...]:
-        return neurons[0]
 
-    def uptate_neurons_weights(self, neurons: Tuple[Neuron, ...]) -> None:
+class RandomStrategy(LearningStrategy):
+    def choose_neurons(self, data_point: DataPoint) -> Tuple[Tuple[Neuron, ...], float]:
+        neuron = random.choice(self.neural_network.neurons)
+        distance = self.proximity_function(data_point.coordinates, neuron.coordinates)
+
+        return (neuron,), distance
+
+    def uptate_neurons_weights(
+        self,
+        data_point: DataPoint,
+        neurons: Tuple[Neuron, ...],
+        learning_rate: float,
+    ) -> None:
         for neuron in neurons:
+            coordinates = neuron.coordinates + learning_rate * (
+                data_point.coordinates - neuron.coordinates
+            )
+            neuron.update_weights(coordinates=coordinates)
+
+    @classmethod
+    def dummy(cls) -> "RandomStrategy":
+        return cls(
+            proximity_function=euclidean_distance,
+            learning_rate=fixed_learning_rate(0.2),
+        )
 
 
+class StateVector(BaseModel):
+    n: List[int] = []
+    epoch: List[int] = []
+    iteration: List[int] = []
+    active_data_point: List[UUID] = []
+    active_neurons: List[List[UUID]] = []
+    learning_rate: List[float] = []
+    quantization_error: List[float] = []
 
-class WTAStrategy(LearningStrategy): ...
-
-
-class FSCLStrategy(LearningStrategy): ...
-
-
-class SOMStrategy(LearningStrategy): ...
+    def update(
+        self,
+        step: int,
+        epoch: int,
+        iteration: int,
+        active_data_point: UUID,
+        active_neurons: List[UUID],
+        learning_rate: float,
+        quantization_error: float,
+    ) -> None:
+        self.n.append(step)
+        self.epoch.append(epoch)
+        self.iteration.append(iteration)
+        self.active_data_point.append(active_data_point)
+        self.active_neurons.append(active_neurons)
+        self.learning_rate.append(learning_rate)
+        self.quantization_error.append(quantization_error)
 
 
 class Experiment(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     learning_strategy: LearningStrategy
-    neural_network: NeuralNetwork
+    learning_rate: Callable
     dataset: Dataset
     n_epochs: int
+    step: int = 0
+    state: int = 0
+    epoch: int = 0
+    state_vector: StateVector = Field(default_factory=StateVector)
+
+    def run_experiment(self) -> None:
+        while self.epoch < self.n_epochs:
+            self.run_epoch()
+        return
+
+    def run_to_end(self) -> None:
+        while self.step < self.n_states:
+            self.run_step()
+
+    def run_epoch(self) -> None:
+        while len(self.dataset.used_points) < self.dataset.len:
+            if self.step == self.n_states:
+                break
+            self.run_step()
+        self.run_step()
+        return
+
+    def run_n_steps(self, n: int) -> None:
+        for _ in range(n):
+            self.run_step()
+
+    def run_step(self) -> None:
+        if (
+            self.state < self.dataset.len - 1
+            and self.dataset.reset_count < self.n_epochs
+        ):
+            self._run()
+
+        elif (
+            self.state == self.dataset.len - 1
+            and self.dataset.reset_count < self.n_epochs
+        ):
+            self._run()
+            self.epoch += 1
+            self.state = 0
+            self.dataset.reset()
+
+        else:
+            return
+
+    def _run(self) -> None:
+        data_point = self.dataset.get_one()
+        neurons, distance = self.learning_strategy.choose_neurons(data_point=data_point)
+        learning_rate = self.learning_rate(state=self.step)
+        self.learning_strategy.uptate_neurons_weights(
+            data_point=data_point,
+            neurons=neurons,
+            learning_rate=learning_rate,
+        )
+        self.state_vector.update(
+            step=self.step,
+            epoch=self.epoch,
+            iteration=self.state,
+            active_data_point=data_point.id,
+            active_neurons=[n.id for n in neurons],
+            learning_rate=learning_rate,
+            quantization_error=distance,
+        )
+        self.step += 1
+        self.state += 1
+
+    @property
+    def n_states(self) -> int:
+        return self.n_epochs * self.dataset.len
+
+
+class InitializerFactory(BaseModel):
+    @staticmethod
+    def zero_initializer(n_neurons: int, n_dimensions: int) -> NeuralNetwork:
+        return NeuralNetwork(
+            neurons=tuple(
+                [Neuron(coordinates=np.zeros(n_dimensions)) for _ in range(n_neurons)]
+            )
+        )
 
 
 class ExperimentFactory(BaseModel):
     @staticmethod
     def create_experiment(
-        learning_strategy: LearningStrategy,
-        neural_network_initializer: Literal["random", "zero"],
-        n_neurons: int,
         dataset: Dataset,
+        learning_strategy: LearningStrategy,
+        n_neurons: int,
         n_epochs: int,
+        learning_rate: Callable = fixed_learning_rate(0.1),
     ) -> Experiment:
-        dimension = dataset.dimension
-
-        if neural_network_initializer == "random":
-            neural_network = NeuralNetwork(
-                neurons=[
-                    Neuron(coordinates=tuple([random() for _ in range(dimension)]))
-                    for _ in range(n_neurons)
-                ]
-            )
-        elif neural_network_initializer == "zero":
-            neural_network = NeuralNetwork(
-                neurons=[
-                    Neuron(coordinates=tuple([0 for _ in range(dimension)]))
-                    for _ in range(n_neurons)
-                ]
-            )
-
         return Experiment(
             learning_strategy=learning_strategy,
-            neural_network=neural_network,
             dataset=dataset,
             n_epochs=n_epochs,
+            learning_rate=learning_rate,
+        )
+
+    @staticmethod
+    def create_random_experiment(
+        n_points: int = 100,
+        n_neurons: int = 2,
+        dimension: int = 2,
+        n_epochs: int = 2,
+        initializer: Callable = InitializerFactory.zero_initializer,
+    ) -> Experiment:
+        learning_strategy = RandomStrategy(
+            proximity_function=euclidean_distance,
+            neural_network=initializer(n_neurons=n_neurons, n_dimensions=dimension),
+        )
+        dataset = Dataset.dummy(dimension=dimension, len=n_points)
+        learning_rate = fixed_learning_rate(0.2)
+
+        return ExperimentFactory.create_experiment(
+            dataset=dataset,
+            learning_strategy=learning_strategy,
+            n_neurons=n_neurons,
+            n_epochs=n_epochs,
+            learning_rate=learning_rate,
         )
