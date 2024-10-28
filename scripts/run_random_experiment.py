@@ -1,8 +1,8 @@
-import os
-import sys
+# import os
+# import sys
 
-# Add the parent directory to the sys.path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+# # Add the parent directory to the sys.path
+# sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from competitive_learning.model import ExperimentFactory
 

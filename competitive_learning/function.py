@@ -6,7 +6,9 @@ def euclidean_distance(x: npt.NDArray[float], y: npt.NDArray[float]) -> float:
     return np.linalg.norm(x - y)
 
 
-def fixed_learning_rate(learning_rate: float):
+def fixed_learning_rate(
+    learning_rate: float, state: int | None = None, n_states: int | None = None
+):
     def learning_rate_function(
         state: int | None = None, n_states: int | None = None
     ) -> float:
