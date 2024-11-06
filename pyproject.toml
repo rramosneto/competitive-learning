@@ -11,9 +11,20 @@ dependencies = [
     "jupyterlab>=4.2.5",
     "matplotlib>=3.9.2",
     "numpy>=2.1.2",
+    "numpydantic>=1.6.4",
     "pandas>=2.2.3",
     "pudb>=2024.1.3",
     "pydantic>=2.9.2",
     "streamlit>=1.39.0",
     "uvicorn>=0.32.0",
 ]
+
+# configure pyright
+[tool.pyright]
+venvPath = "./.venv"          # Path to your virtual environment folder
+venv = ".venv"                # Name of your virtual environment folder
+pythonVersion = "3.11"        # Specify the Python version
+reportMissingImports = true   # Enable reporting of missing imports
+reportMissingTypeStubs = true # Enable reporting of missing type stubs
+typeCheckingMode = "basic"    # Set type checking mode to basic
+useLibraryCodeForTypes = true # Use library code for type information

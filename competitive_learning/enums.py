@@ -1,6 +1,11 @@
 from enum import Enum
 
-from competitive_learning.function import euclidean_distance, fixed_learning_rate
+from competitive_learning.function import (
+    euclidean_distance,
+    exponential_decay,
+    fixed_learning_rate,
+    linear_decay,
+)
 from competitive_learning.model import InitializerFactory, RandomStrategy, WTAStrategy
 
 
@@ -11,8 +16,8 @@ class NeuronInitializer(Enum):
 
 class LearningRateFunction(Enum):
     CONSTANT = "constant"
-    # LINEAR = "linear"
-    # EXPONENTIAL = "exponential"
+    LINEAR = "linear_decay"
+    EXPONENTIAL = "exponential_decay"
     # INVERSE = "inverse"
     # SIGMOID = "sigmoid"
 
@@ -33,8 +38,21 @@ INITIALIZER = {
     NeuronInitializer.MEAN_INITIALIZER.value: InitializerFactory.mean_initializer,
 }
 
-LEARNING_RATE_FUNCTION = {LearningRateFunction.CONSTANT.value: fixed_learning_rate}
+LEARNING_RATE_FUNCTION = {
+    LearningRateFunction.CONSTANT.value: fixed_learning_rate,
+    LearningRateFunction.LINEAR.value: linear_decay,
+    LearningRateFunction.EXPONENTIAL.value: exponential_decay,
+}
 
 PROXIMITY_FUNCTION = {ProximityFunction.EUCLIDEAN_DISTANCE.value: euclidean_distance}
 
 STRATEGY = {Strategy.RANDOM.value: RandomStrategy, Strategy.WTA.value: WTAStrategy}
+
+available_strategies = [strategy.value for strategy in Strategy]
+available_proximity_functions = [
+    proximity_function.value for proximity_function in ProximityFunction
+]
+available_learning_rate_functions = [
+    learning_rate_function.value for learning_rate_function in LearningRateFunction
+]
+available_initializers = [initializer.value for initializer in NeuronInitializer]

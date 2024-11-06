@@ -9,7 +9,7 @@ def load_csv(file):
 
 
 def load_iris(file):
-    df = pd.read_csv(file)
+    df = pd.read_csv(file, header=None)
     df.columns = [
         "sepal_length",
         "sepal_width",

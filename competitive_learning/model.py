@@ -1,24 +1,32 @@
 from __future__ import annotations
 
-import altair as alt
 import random
 from abc import ABC, abstractmethod
-from typing import Any, Callable, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing_extensions import Annotated
 from uuid import UUID, uuid4
 
+import altair as alt
+import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_serializer, model_validator
 from pydantic.config import ConfigDict  # noqa: F401
-import matplotlib.pyplot as plt
+from pydantic.functional_serializers import PlainSerializer
 
 from competitive_learning.function import euclidean_distance, fixed_learning_rate
+from numpydantic import NDArray, Shape
+
+ID = Annotated[UUID, PlainSerializer(lambda x: str(x), return_type=str)]
+Array = Annotated[np.ndarray, PlainSerializer(lambda x: x.tolist(), return_type=list)]
 
 
 class DataPoint(BaseModel):
-    id: UUID = Field(default_factory=uuid4)
-    coordinates: npt.NDArray[np.float64]
+    id: ID = Field(default_factory=uuid4)
+    coordinates: (
+        Array  # NDArray[Shape["*, ..."], np.float64]  # npt.NDArray[np.float64]
+    )
 
     @property
     def dimension(self) -> int:
@@ -45,7 +53,7 @@ class DataPoint(BaseModel):
 
 
 class Dataset(BaseModel):
-    id: UUID = Field(default_factory=uuid4)
+    id: ID = Field(default_factory=uuid4)
     data_points: Tuple[DataPoint, ...]
     available_points: Set[int] = Field(default_factory=set)
     used_points: Set[int] = Field(default_factory=set)
@@ -124,14 +132,17 @@ class Dataset(BaseModel):
 
 class Neuron(DataPoint):
     iterations: int = 0
+    distances: Array = np.array([])  # Field(default_factory=np.array)
+    relevance_score: float = 0.0
 
-    def update_weights(self, coordinates: Tuple[float, ...]) -> None:
+    def update_weights(self, coordinates: Array, distance: float) -> None:
         self.iterations += 1
         self.coordinates = coordinates
+        self.distances = np.append(self.distances, distance)
 
 
 class NeuralNetwork(BaseModel):
-    id: UUID = Field(default_factory=uuid4)
+    id: ID = Field(default_factory=uuid4)
     neurons: Tuple[Neuron, ...]
 
     @property
@@ -150,24 +161,56 @@ class NeuralNetwork(BaseModel):
                 f"Index {index} is out of range for neurons with length {len(self.neurons)}"
             )
 
-    @model_validator(mode="before")
-    @classmethod
-    def check_neurons_dimensions(cls, data: Any) -> Any:
-        neurons = data.get("neurons", [])
-        if neurons:
-            first_dimension = neurons[0].dimension
-            for n in neurons:
-                if n.dimension != first_dimension:
-                    raise ValueError("All neurons must have the same dimension")
-        return data
-
     @classmethod
     def dummy(cls, dimension: int) -> "NeuralNetwork":
         return cls(neurons=(Neuron.dummy(dimension), Neuron.dummy(dimension)))
 
+    @classmethod
+    def from_dict(cls, data):
+        neurons = [
+            Neuron(coordinates=np.array(neuron["coordinates"]))
+            for neuron in data["neurons"]
+        ]
+        return cls(id=data["id"], neurons=tuple(neurons))
+
+    def get_neurons_report(self, dataset: Dataset) -> pd.DataFrame:
+        self.calculate_relevance(dataset)
+        row_list = []
+        for i, neuron in enumerate(self.neurons):
+            row = {}
+            row["neuron"] = i
+            row["iterations"] = neuron.iterations
+            row["travelled_distance"] = neuron.distances.sum()
+            row["relevance"] = neuron.relevance_score
+            row_list.append(row)
+
+        df = pd.DataFrame(row_list).sort_values("relevance", ascending=False)
+
+        return df
+
+    def assign_data_points(self, dataset: Dataset) -> Dict[int, List[DataPoint]]:
+        assignments = {i: [] for i in range(len(self.neurons))}
+
+        for dp in dataset.data_points:
+            closest_neuron_index = np.argmin(
+                [
+                    np.linalg.norm(dp.coordinates - neuron.coordinates)
+                    for neuron in self.neurons
+                ]
+            )
+            assignments[closest_neuron_index].append(dp)
+
+        return assignments
+
+    def calculate_relevance(self, dataset: Dataset) -> None:
+        assignments = self.assign_data_points(dataset)
+
+        for i, neuron in enumerate(self.neurons):
+            neuron.relevance_score = len(assignments[i]) / dataset.len
+
 
 class LearningStrategy(BaseModel, ABC):
-    id: UUID = Field(default_factory=uuid4)
+    id: ID = Field(default_factory=uuid4)
     proximity_function: Callable
     neural_network: NeuralNetwork
 
@@ -195,11 +238,9 @@ class WTAStrategy(LearningStrategy):
     """
 
     def choose_neurons(self, data_point: DataPoint) -> Tuple[Tuple[Neuron, ...], float]:
-        # Initialize the minimum distance to a large value
         min_distance = float("inf")
         closest_neuron = None
 
-        # Iterate over all neurons to find the closest one
         for neuron in self.neural_network.neurons:
             distance = self.proximity_function(
                 data_point.coordinates, neuron.coordinates
@@ -208,7 +249,6 @@ class WTAStrategy(LearningStrategy):
                 min_distance = distance
                 closest_neuron = neuron
 
-        # Return the closest neuron and the corresponding distance
         return (closest_neuron,), min_distance
 
     def uptate_neurons_weights(
@@ -221,7 +261,8 @@ class WTAStrategy(LearningStrategy):
             coordinates = neuron.coordinates + learning_rate * (
                 data_point.coordinates - neuron.coordinates
             )
-            neuron.update_weights(coordinates=coordinates)
+            distance = self.proximity_function(data_point.coordinates, coordinates)
+            neuron.update_weights(coordinates=coordinates, distance=distance)
 
     @classmethod
     def dummy(cls) -> "RandomStrategy":
@@ -248,7 +289,8 @@ class RandomStrategy(LearningStrategy):
             coordinates = neuron.coordinates + learning_rate * (
                 data_point.coordinates - neuron.coordinates
             )
-            neuron.update_weights(coordinates=coordinates)
+            distance = self.proximity_function(data_point.coordinates, coordinates)
+            neuron.update_weights(coordinates=coordinates, distance=distance)
 
     @classmethod
     def dummy(cls) -> "RandomStrategy":
@@ -262,8 +304,8 @@ class StateVector(BaseModel):
     n: List[int] = Field(default_factory=list)
     epoch: List[int] = Field(default_factory=list)
     iteration: List[int] = Field(default_factory=list)
-    active_data_point: List[UUID] = Field(default_factory=list)
-    active_neurons: List[List[UUID]] = Field(default_factory=list)
+    active_data_point: List[ID] = Field(default_factory=list)
+    active_neurons: List[List[ID]] = Field(default_factory=list)
     learning_rate: List[float] = Field(default_factory=list)
     quantization_error: List[float] = Field(default_factory=list)
     df: Optional[pd.DataFrame] = Field(
@@ -285,8 +327,8 @@ class StateVector(BaseModel):
         step: int,
         epoch: int,
         iteration: int,
-        active_data_point: UUID,
-        active_neurons: List[UUID],
+        active_data_point: ID,
+        active_neurons: List[ID],
         learning_rate: float,
         quantization_error: float,
     ) -> None:
@@ -310,12 +352,33 @@ class StateVector(BaseModel):
         }
         self.df = pd.concat([self.df, pd.DataFrame([new_row])], ignore_index=True)
 
+    def get_quantization_error(self) -> pd.DataFrame:
+        def mean_squared(s: pd.Series):
+            return np.mean(s**2)
+
+        grouped = (
+            self.df.groupby("epoch")["quantization_error"]
+            .agg(mean_squared)
+            .to_frame()
+            .reset_index()
+        )
+
+        return grouped
+
     class Config:
         arbitrary_types_allowed = True
 
 
+class LearningRate(BaseModel):
+    def __init__(
+        self, learning_rate_type: str, initial_learning_rate: float, n_states: int
+    ) -> None:
+        self.learning_rate_type = learning_rate_type
+        self.initial_learning_rate = initial_learning_rate
+
+
 class Experiment(BaseModel):
-    id: UUID = Field(default_factory=uuid4)
+    id: ID = Field(default_factory=uuid4)
     learning_strategy: LearningStrategy
     learning_rate: Callable
     dataset: Dataset
@@ -341,12 +404,11 @@ class Experiment(BaseModel):
             self.run_step()
 
     def run_epoch(self) -> None:
-        while len(self.dataset.used_points) < self.dataset.len:
-            if self.step == self.n_states:
-                break
+        if self.epoch < self.n_epochs:
+            while self.state < self.dataset.len - 1:
+                self.run_step()
             self.run_step()
-        self.run_step()
-        return
+            return
 
     def run_n_steps(self, n: int) -> None:
         for _ in range(n):
@@ -398,9 +460,9 @@ class Experiment(BaseModel):
 
     def plot_quantization_error(self):
         chart = (
-            alt.Chart(self.state_vector.df)
+            alt.Chart(self.state_vector.get_quantization_error())
             .mark_line()
-            .encode(x="n", y="quantization_error")
+            .encode(x="epoch", y="quantization_error")
             .properties(title="Quantization Error")
         )
         return chart
@@ -414,12 +476,19 @@ class Experiment(BaseModel):
         )
         return chart
 
-    def plot_dataset_with_neurons(self, data, x, y, color=None):
+    def plot_dataset_with_neurons(
+        self,
+        data: pd.DataFrame,
+        x_axis: str,
+        y_axis: str,
+        features_dict: Dict[str, int],
+        color=None,
+    ):
         # Create the base chart for the dataset
         chart = (
             alt.Chart(data)
             .mark_circle()
-            .encode(x=x, y=y, color=color if color else alt.value("blue"))
+            .encode(x=x_axis, y=y_axis, color=color if color else alt.value("blue"))
             .properties(title="Dataset with Neurons")
         )
 
@@ -427,11 +496,11 @@ class Experiment(BaseModel):
         neurons_df = pd.DataFrame(
             {
                 "x": [
-                    n.coordinates[0]
+                    n.coordinates[features_dict[x_axis]]
                     for n in self.learning_strategy.neural_network.neurons
                 ],
                 "y": [
-                    n.coordinates[1]
+                    n.coordinates[features_dict[y_axis]]
                     for n in self.learning_strategy.neural_network.neurons
                 ],
             }
@@ -465,7 +534,10 @@ class InitializerFactory(BaseModel):
     ) -> NeuralNetwork:
         return NeuralNetwork(
             neurons=tuple(
-                [Neuron(coordinates=dataset.mean_vector) for _ in range(n_neurons)]
+                [
+                    Neuron(coordinates=np.array(dataset.mean_vector))
+                    for _ in range(n_neurons)
+                ]
             )
         )
 
@@ -476,7 +548,7 @@ class ExperimentFactory(BaseModel):
         dataset: Dataset,
         learning_strategy: LearningStrategy,
         n_epochs: int,
-        learning_rate: Callable = fixed_learning_rate(0.1),
+        learning_rate: Callable,
     ) -> Experiment:
         return Experiment(
             learning_strategy=learning_strategy,

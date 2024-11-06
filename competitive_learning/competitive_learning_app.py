@@ -4,7 +4,12 @@ from competitive_learning.enums import (
     PROXIMITY_FUNCTION,
     STRATEGY,
 )
-from competitive_learning.model import Experiment, ExperimentFactory, LearningStrategy
+from competitive_learning.model import (
+    Experiment,
+    ExperimentFactory,
+    LearningStrategy,
+    NeuralNetwork,
+)
 from competitive_learning.handler.data import load_csv
 
 
@@ -14,10 +19,11 @@ class CompetitiveLearningApp:
         self.dataframe = None
         self.dataset = None
         self.experiment = None
+        self.epochs = None
         self.start_learning_rate = None
         self.learning_rate_function = None
+        self.epochs_for_learning_rate = None
         self.proximity_function = None
-        self.epochs = None
         self.n_neurons = None
         self.neurons_initializer = None
 
@@ -26,21 +32,52 @@ class CompetitiveLearningApp:
 
     def setup_experiment(
         self,
+        epochs,
         start_learning_rate,
         learning_rate_function,
-        epochs,
+        epochs_for_learning_rate,
         n_neurons,
         neurons_initializer,
         strategy,
         proximity_function,
     ):
+        self.epochs = epochs
         self.start_learning_rate = start_learning_rate
         self.learning_rate_function = learning_rate_function
-        self.epochs = epochs
+        self.epochs_for_learning_rate = epochs_for_learning_rate
         self.n_neurons = n_neurons
         self.neurons_initializer = neurons_initializer
         self.strategy = strategy
         self.proximity_function = proximity_function
+
+    def create_experiment_from_previous(
+        self,
+        epochs,
+        start_learning_rate,
+        learning_rate_function,
+        epochs_for_learning_rate,
+        neural_network,
+        strategy,
+        proximity_function,
+    ):
+        self.epochs = epochs
+        self.start_learning_rate = start_learning_rate
+        self.learning_rate_function = learning_rate_function
+        self.epochs_for_learning_rate = epochs_for_learning_rate
+        self.strategy = strategy
+        self.proximity_function = proximity_function
+
+        learning_rate = self.create_learning_rate()
+        strategy = STRATEGY[self.strategy](
+            proximity_function=self.create_proximity_function(),
+            neural_network=NeuralNetwork.from_dict(neural_network),
+        )
+        self.experiment = ExperimentFactory.create_experiment(
+            learning_strategy=strategy,
+            dataset=self.dataset,
+            n_epochs=self.epochs,
+            learning_rate=learning_rate,
+        )
 
     def create_experiment(self):
         learning_rate = self.create_learning_rate()
@@ -61,7 +98,8 @@ class CompetitiveLearningApp:
     def create_learning_rate(self):
         return LEARNING_RATE_FUNCTION[self.learning_rate_function](
             learning_rate=self.start_learning_rate,
-            n_states=self.epochs * self.dataset.len,
+            n_states=self.epochs_for_learning_rate * self.dataset.len,
+            # n_states=self.epochs * self.dataset.len,
         )
 
     def create_proximity_function(self):
@@ -73,3 +111,6 @@ class CompetitiveLearningApp:
             self.n_neurons, self.dataset.dimension, self.dataset
         )
         return neural_network
+
+    def load_experiment(self, experiment):
+        self.experiment = experiment

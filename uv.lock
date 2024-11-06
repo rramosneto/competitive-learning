@@ -342,6 +342,7 @@ dependencies = [
     { name = "jupyterlab" },
     { name = "matplotlib" },
     { name = "numpy" },
+    { name = "numpydantic" },
     { name = "pandas" },
     { name = "pudb" },
     { name = "pydantic" },
@@ -357,6 +358,7 @@ requires-dist = [
     { name = "jupyterlab", specifier = ">=4.2.5" },
     { name = "matplotlib", specifier = ">=3.9.2" },
     { name = "numpy", specifier = ">=2.1.2" },
+    { name = "numpydantic", specifier = ">=1.6.4" },
     { name = "pandas", specifier = ">=2.2.3" },
     { name = "pudb", specifier = ">=2024.1.3" },
     { name = "pydantic", specifier = ">=2.9.2" },
@@ -1292,6 +1294,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/7c/8e/fc1fdd83a55476765329ac2913321c4aed5b082a7915095628c4ca30ea72/numpy-2.1.2-cp313-cp313t-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:13311c2db4c5f7609b462bc0f43d3c465424d25c626d95040f073e30f7570e35", size = 16021174 },
     { url = "https://files.pythonhosted.org/packages/2a/b6/a790742aa88067adb4bd6c89a946778c1417d4deaeafce3ca928f26d4c52/numpy-2.1.2-cp313-cp313t-musllinux_1_1_x86_64.whl", hash = "sha256:2abbf905a0b568706391ec6fa15161fad0fb5d8b68d73c461b3c1bab6064dd62", size = 16400117 },
     { url = "https://files.pythonhosted.org/packages/48/6f/129e3c17e3befe7fefdeaa6890f4c4df3f3cf0831aa053802c3862da67aa/numpy-2.1.2-cp313-cp313t-musllinux_1_2_aarch64.whl", hash = "sha256:ef444c57d664d35cac4e18c298c47d7b504c66b17c2ea91312e979fcfbdfb08a", size = 14066202 },
+]
+
+[[package]]
+name = "numpydantic"
+version = "1.6.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3b/10/7ef66aa8222419f4f740df20c6bf2aa7eb45ef58637b8a007b6d0aac6b72/numpydantic-1.6.4.tar.gz", hash = "sha256:aee95982a2bd2ea1e45a73025cdbd64db7978d9b95aeaae3229a0fbbb3dc3bd7", size = 76743 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/20/c1/67a3ad8511e113897511197d7b9a87141cdc763d25b0a8d5589da7275e0d/numpydantic-1.6.4-py3-none-any.whl", hash = "sha256:91c0db6e77f2c5b6d8f3365b8a1f2140dcd7984088635afe88fd1d0f65bcc574", size = 85072 },
 ]
 
 [[package]]
