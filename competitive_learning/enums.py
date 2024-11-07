@@ -6,7 +6,12 @@ from competitive_learning.function import (
     fixed_learning_rate,
     linear_decay,
 )
-from competitive_learning.model import InitializerFactory, RandomStrategy, WTAStrategy
+from competitive_learning.model import (
+    InitializerFactory,
+    RandomStrategy,
+    WTAStrategy,
+    FSCLStrategy,
+)
 
 
 class NeuronInitializer(Enum):
@@ -29,7 +34,7 @@ class ProximityFunction(Enum):
 class Strategy(Enum):
     RANDOM = "random"
     WTA = "wta"
-    # FSCL = "fscl"
+    FSCL = "fscl"
     # SOM = "som"
 
 
@@ -46,7 +51,11 @@ LEARNING_RATE_FUNCTION = {
 
 PROXIMITY_FUNCTION = {ProximityFunction.EUCLIDEAN_DISTANCE.value: euclidean_distance}
 
-STRATEGY = {Strategy.RANDOM.value: RandomStrategy, Strategy.WTA.value: WTAStrategy}
+STRATEGY = {
+    Strategy.RANDOM.value: RandomStrategy,
+    Strategy.WTA.value: WTAStrategy,
+    Strategy.FSCL.value: FSCLStrategy,
+}
 
 available_strategies = [strategy.value for strategy in Strategy]
 available_proximity_functions = [

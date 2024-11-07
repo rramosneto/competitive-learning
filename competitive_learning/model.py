@@ -144,6 +144,7 @@ class Neuron(DataPoint):
 class NeuralNetwork(BaseModel):
     id: ID = Field(default_factory=uuid4)
     neurons: Tuple[Neuron, ...]
+    iterations: int = 0
 
     @property
     def dimension(self) -> int:
@@ -155,6 +156,7 @@ class NeuralNetwork(BaseModel):
 
     def __getitem__(self, index: int) -> Neuron:
         try:
+            self.iterations += 1
             return self.neurons[index]
         except IndexError:
             raise IndexError(
@@ -206,7 +208,7 @@ class NeuralNetwork(BaseModel):
         assignments = self.assign_data_points(dataset)
 
         for i, neuron in enumerate(self.neurons):
-            neuron.relevance_score = len(assignments[i]) / dataset.len
+            neuron.relevance_score = len(assignments[i])
 
 
 class LearningStrategy(BaseModel, ABC):
@@ -227,10 +229,6 @@ class LearningStrategy(BaseModel, ABC):
     ) -> None:
         pass
 
-    @classmethod
-    def dummy(cls) -> "LearningStrategy":
-        return RandomStrategy(proximity_function=lambda x: x, learning_rate=lambda x: x)
-
 
 class WTAStrategy(LearningStrategy):
     """
@@ -238,16 +236,30 @@ class WTAStrategy(LearningStrategy):
     """
 
     def choose_neurons(self, data_point: DataPoint) -> Tuple[Tuple[Neuron, ...], float]:
-        min_distance = float("inf")
-        closest_neuron = None
+        # min_distance = float("inf")
+        # closest_neuron = None
 
-        for neuron in self.neural_network.neurons:
-            distance = self.proximity_function(
-                data_point.coordinates, neuron.coordinates
-            )
-            if distance < min_distance:
-                min_distance = distance
-                closest_neuron = neuron
+        # for neuron in self.neural_network.neurons:
+        #     distance = self.proximity_function(
+        #         data_point.coordinates, neuron.coordinates
+        #     )
+        #     if distance < min_distance:
+        #         min_distance = distance
+        #         closest_neuron = neuron
+
+        # return (closest_neuron,), min_distance
+
+        distances = np.array(
+            [
+                self.proximity_function(data_point.coordinates, neuron.coordinates)
+                for neuron in self.neural_network.neurons
+            ]
+        )
+
+        min_index = np.argmin(distances)
+        min_distance = distances[min_index]
+        # closest_neuron = self.neural_network.neurons[min_index]
+        closest_neuron = self.neural_network[min_index]
 
         return (closest_neuron,), min_distance
 
@@ -265,10 +277,79 @@ class WTAStrategy(LearningStrategy):
             neuron.update_weights(coordinates=coordinates, distance=distance)
 
     @classmethod
-    def dummy(cls) -> "RandomStrategy":
+    def dummy(cls) -> "WTAStrategy":
         return cls(
             proximity_function=euclidean_distance,
-            learning_rate=fixed_learning_rate(0.2),
+            neural_network=NeuralNetwork.dummy(2),
+        )
+
+
+class FSCLStrategy(LearningStrategy):
+    """
+    Frequency Sensitive Competitive Learning (FSCL) Strategy
+
+    This learning strategy selects the neuron closest to the input data point and
+    updates its weight based on selection frequency. A penalty is applied to frequently
+    chosen neurons to promote diversity and balanced learning across the network.
+    """
+
+    def weight_penalty(self, neuron: Neuron) -> float:
+        if self.neural_network.iterations == 0:
+            return 0
+        return neuron.iterations / self.neural_network.iterations
+
+    def choose_neurons(self, data_point: DataPoint) -> Tuple[Tuple[Neuron, ...], float]:
+        # min_distance = float("inf")
+        # closest_neuron = None
+
+        # for neuron in self.neural_network.neurons:
+        #     distance = self.proximity_function(
+        #         data_point.coordinates, neuron.coordinates
+        #     )
+        #     penalized_distance = self.weight_penalty(neuron) * distance
+        #     if penalized_distance < min_distance:
+        #         min_distance = penalized_distance
+        #         closest_neuron = neuron
+
+        # return (closest_neuron,), min_distance
+
+        distances = np.array(
+            [
+                self.proximity_function(data_point.coordinates, neuron.coordinates)
+                for neuron in self.neural_network.neurons
+            ]
+        )
+
+        penalties = np.array(
+            [self.weight_penalty(neuron) for neuron in self.neural_network.neurons]
+        )
+
+        penalized_distances = distances * penalties
+        min_index = np.argmin(penalized_distances)
+        min_distance = distances[min_index]
+        # closest_neuron = self.neural_network.neurons[min_index]
+        closest_neuron = self.neural_network[min_index]
+
+        return (closest_neuron,), min_distance
+
+    def uptate_neurons_weights(
+        self,
+        data_point: DataPoint,
+        neurons: Tuple[Neuron, ...],
+        learning_rate: float,
+    ) -> None:
+        for neuron in neurons:
+            coordinates = neuron.coordinates + learning_rate * (
+                data_point.coordinates - neuron.coordinates
+            )
+            distance = self.proximity_function(data_point.coordinates, coordinates)
+            neuron.update_weights(coordinates=coordinates, distance=distance)
+
+    @classmethod
+    def dummy(cls) -> "WTAStrategy":
+        return cls(
+            proximity_function=euclidean_distance,
+            neural_network=NeuralNetwork.dummy(2),
         )
 
 
@@ -296,7 +377,7 @@ class RandomStrategy(LearningStrategy):
     def dummy(cls) -> "RandomStrategy":
         return cls(
             proximity_function=euclidean_distance,
-            learning_rate=fixed_learning_rate(0.2),
+            neural_network=NeuralNetwork.dummy(2),
         )
 
 
